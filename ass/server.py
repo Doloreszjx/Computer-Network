@@ -2,13 +2,6 @@ import socket
 import sys
 import threading
 import json
-import time
-
-
-def time_to_date(timestamp):
-    datettime = time.strftime(
-        '%Y-%m-%d %H:%M:%S', time.localtime(timestamp/1000))
-    return datettime
 
 
 def load_master_file(filename):
@@ -23,32 +16,12 @@ def load_master_file(filename):
     return records
 
 
-# def recursive_query(domain, qtype, records, visited=None):
-#     if visited is None:
-#         visited = []
-
-#     if qtype == 'A':
-#         if domain in records and 'A' in records[domain]:
-#             print('domain, qtype, records:', domain, qtype, records)
-#             return domain, 'A', records[domain]['A']
-#     elif qtype == 'NS':
-#         if domain in records and 'NS' in records[domain]:
-#             ns_domain = records[domain]['NS']
-#             return recursive_query(ns_domain, 'A', records, visited)
-#     elif qtype == 'CNAME' or (domain in records and 'CNAME' in records[domain]):
-#         cname_domain = records[domain]['CNAME']
-#         if cname_domain not in visited:
-#             visited.append(cname_domain)
-#             return recursive_query(cname_domain, 'A', records, visited)
-#     return None, None, None
-
 def recursive_query(domain, qtype, records, visited=None):
     if visited is None:
         visited = []
 
     if qtype == 'A':
         if domain in records and 'A' in records[domain]:
-            # print('domain, qtype, records:', domain, qtype, records)
             return domain, 'A', records[domain]['A']
     elif qtype == 'NS':
         if domain in records and 'NS' in records[domain]:
@@ -57,28 +30,23 @@ def recursive_query(domain, qtype, records, visited=None):
     elif qtype == 'CNAME' or (domain in records and 'CNAME' in records[domain]):
         cname_domain = records[domain]['CNAME']
         if cname_domain not in visited:
-            print('NS:', domain, cname_domain)
             visited.append(cname_domain)
             return recursive_query(cname_domain, 'A', records, visited)
     return None, None, None
 
 
-def handle_client(query, server_port, server_socket, client_address, records):
+def handle_client(server_socket, client_address, records):
+    print('handle_client1')
+    query, _ = server_socket.recvfrom(1024)
     query_data = json.loads(query.decode())
-    qid = query_data['qid']
-    qname = query_data['qname']
-    qtype = query_data['qtype']
-    recv_time = query_data['qtime']
-    recv_date = time_to_date(int(recv_time))
+    qid = query_data['id']
+    qname = query_data['name']
+    qtype = query_data['type']
+    print('handle_client2')
 
-    response_data = {
-        'qid': qid,
-        'qname': qname,
-        'qtype': qtype,
-        'ANSWER_SECTION': [],
-        # 'AUTHORITY SECTION': [],
-        # 'ADDITIONAL SECTION': []
-    }
+    print(f"Received query: qname={qname}, qtype={qtype}")
+
+    response_data = {'id': qid, 'name': qname, 'type': qtype, 'data': []}
 
     visited = []
 
@@ -86,7 +54,7 @@ def handle_client(query, server_port, server_socket, client_address, records):
         data_domain, data_type, data = recursive_query(
             qname, qtype, records, visited)
         if data:
-            response_data['ANSWER_SECTION'].append(
+            response_data['data'].append(
                 {'domain': data_domain, 'type': data_type, 'data': data})
             if data_type == 'CNAME' and qtype != 'CNAME':
                 qname = data
@@ -94,23 +62,12 @@ def handle_client(query, server_port, server_socket, client_address, records):
             else:
                 break
         else:
-            response_data['ANSWER_SECTION'].append(
+            response_data['data'].append(
                 {'domain': qname, 'type': qtype, 'data': 'No such record'})
             break
 
     response = json.dumps(response_data).encode()
-    send_time = int(round(time.time()*1000))
-    date_send_time = time_to_date(send_time)
-    delay_time = (send_time - recv_time) / 1000
-
-    if delay_time != 0:
-        print(
-            f"{recv_date} rcv {server_port}: {qid} {qname} {qtype} (delay: {delay_time}s)")
-    else:
-        print(f"{recv_date} rcv {server_port}: {qid} {qname} {qtype}")
-
-    print(f"{date_send_time} snd {server_port}: {qid} {qname} {qtype}")
-
+    print(f"Sending response: {response}")
     server_socket.sendto(response, client_address)
 
 
@@ -129,10 +86,9 @@ def main():
 
     while True:
         query, client_address = server_socket.recvfrom(1024)
-
         client_handler = threading.Thread(
             target=handle_client,
-            args=(query, server_port, server_socket, client_address, records)
+            args=(server_socket, client_address, records)
         )
         client_handler.start()
 

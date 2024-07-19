@@ -2,25 +2,16 @@ import socket
 import sys
 import random
 import json
-import time
 
 
 def create_query(qid, qname, qtype):
-    timestamp = int(round(time.time()*1000))
     query_data = {
-        'qid': qid,
-        'qname': qname,
-        'qtype': qtype,
-        'qtime': timestamp
+        'id': qid,
+        'name': qname,
+        'type': qtype
     }
-    # print(f"Sending query to server: {query_data}")
+    print(f"Sending query to server: {query_data}")
     return json.dumps(query_data).encode()
-
-
-def dic_to_str(ori_dic):
-    kv_pairs = [f'{key}: {value}' for key, value in ori_dic.items()]
-    result = ', '.join(kv_pairs)
-    return result
 
 
 def main():
@@ -42,7 +33,7 @@ def main():
 
     qid = random.randint(0, 65535)
     query = create_query(qid, qname, qtype)
-
+    print(query)
     client_socket.sendto(query, ("127.0.0.1", server_port))
 
     try:
@@ -50,25 +41,16 @@ def main():
         response_data = json.loads(response.decode())
         print("Response from server:", response_data)
 
-        qid = response_data.get('qid')
-        qname = response_data.get('qname')
-        qtype = response_data.get('qtype')
-        ANSWER_SECTION = response_data.get('ANSWER_SECTION')
-        answers = []
-        for ele in ANSWER_SECTION:
-            format_ele = dic_to_str(ele)
-            answers.append(format_ele)
-        # print('response_data:', qid, qname, qtype, answers)
-        if qtype in ['A', 'NS', 'CNAME']:
-            print('ID: ', qid)
-            print('\n')
-            print('QUESTION SECTION:\n', qname, qtype)
-            print('\n')
-            print('ANSWER SECTION:')
-            for item in answers:
-                print(item)
+        qid, qname, qtype, data = response_data
+
+        if qtype == 'A':
+            print(f"Address: {data}")
+        elif qtype == 'NS':
+            print(f"Name Server: {data}")
+        elif qtype == 'CNAME':
+            print(f"Canonical Name: {data}")
         else:
-            print(f"Unknown type {qtype}: qname: {qname}")
+            print(f"Unknown type {qtype}: {data}")
 
     except socket.timeout:
         print("Request timed out")
