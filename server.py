@@ -7,7 +7,7 @@ import time
 
 def time_to_date(timestamp):
     datettime = time.strftime(
-        '%Y-%m-%d %H:%M:%S', time.localtime(timestamp/1000))
+        '%Y-%m-%d %H:%M:%S', time.localtime(timestamp / 1000))
     return datettime
 
 
@@ -19,47 +19,26 @@ def load_master_file(filename):
             domain, rtype, data = parts[0], parts[1], parts[2]
             if domain not in records:
                 records[domain] = {}
-            records[domain][rtype] = data
+            if rtype not in records[domain]:
+                records[domain][rtype] = []
+            records[domain][rtype].append(data)
     return records
 
 
-# def recursive_query(domain, qtype, records, visited=None):
-#     if visited is None:
-#         visited = []
+def recursive_query(domain, qtype, records, cname_visited=None):
+    if cname_visited is None:
+        cname_visited = []
 
-#     if qtype == 'A':
-#         if domain in records and 'A' in records[domain]:
-#             print('domain, qtype, records:', domain, qtype, records)
-#             return domain, 'A', records[domain]['A']
-#     elif qtype == 'NS':
-#         if domain in records and 'NS' in records[domain]:
-#             ns_domain = records[domain]['NS']
-#             return recursive_query(ns_domain, 'A', records, visited)
-#     elif qtype == 'CNAME' or (domain in records and 'CNAME' in records[domain]):
-#         cname_domain = records[domain]['CNAME']
-#         if cname_domain not in visited:
-#             visited.append(cname_domain)
-#             return recursive_query(cname_domain, 'A', records, visited)
-#     return None, None, None
+    if domain in records:
+        if qtype in records[domain]:
+            return domain, qtype, records[domain][qtype]
+        elif 'CNAME' in records[domain]:
+            cname_domain = records[domain]['CNAME'][0]
+            if cname_domain not in cname_visited:
+                # cname_visited.append(cname_domain)
+                cname_visited.append(f'{domain},{cname_domain}')
+                return recursive_query(cname_domain, qtype, records, cname_visited)
 
-def recursive_query(domain, qtype, records, visited=None):
-    if visited is None:
-        visited = []
-
-    if qtype == 'A':
-        if domain in records and 'A' in records[domain]:
-            # print('domain, qtype, records:', domain, qtype, records)
-            return domain, 'A', records[domain]['A']
-    elif qtype == 'NS':
-        if domain in records and 'NS' in records[domain]:
-            ns_domain = records[domain]['NS']
-            return recursive_query(ns_domain, 'A', records, visited)
-    elif qtype == 'CNAME' or (domain in records and 'CNAME' in records[domain]):
-        cname_domain = records[domain]['CNAME']
-        if cname_domain not in visited:
-            print('NS:', domain, cname_domain)
-            visited.append(cname_domain)
-            return recursive_query(cname_domain, 'A', records, visited)
     return None, None, None
 
 
@@ -75,31 +54,82 @@ def handle_client(query, server_port, server_socket, client_address, records):
         'qid': qid,
         'qname': qname,
         'qtype': qtype,
-        'ANSWER_SECTION': [],
-        # 'AUTHORITY SECTION': [],
-        # 'ADDITIONAL SECTION': []
+        'answer': [],
+        'authority': [],
+        'additional': []
     }
 
-    visited = []
+    # Query resolution
+    cname_visited = []
+    data_domain, data_type, data = recursive_query(
+        qname, qtype, records, cname_visited)
 
-    while True:
-        data_domain, data_type, data = recursive_query(
-            qname, qtype, records, visited)
-        if data:
-            response_data['ANSWER_SECTION'].append(
-                {'domain': data_domain, 'type': data_type, 'data': data})
-            if data_type == 'CNAME' and qtype != 'CNAME':
-                qname = data
-                qtype = 'A'
+    print('cname_visited', cname_visited)
+    print('data', data)
+
+    # Handling response
+    if len(cname_visited):
+        for domain_cname in cname_visited:
+            domain_cname_str = domain_cname.split(',')
+            domain = domain_cname_str[0]
+            cname = domain_cname_str[1]
+            response_data['answer'].append({
+                'domain': domain,
+                'type': 'CNAME',
+                'data': cname
+            })
+    if data:
+        for item in data:
+            response_data['answer'].append(
+                {'domain': data_domain, 'type': data_type, 'data': item})
+    else:
+        print('No data')
+        # If no answer is found, add authority section if possible
+        closest_domain = qname
+        root_domain = '.'
+
+        print(
+            'wwww', closest_domain in records and 'NS' in records[closest_domain])
+
+        while closest_domain:
+            if closest_domain in records and 'NS' in records[closest_domain]:
+                for ns_record in records[closest_domain]['NS']:
+                    response_data['authority'].append({
+                        'domain': closest_domain,
+                        'type': 'NS',
+                        'data': ns_record
+                    })
+                    if ns_record in records and 'A' in records[ns_record]:
+                        for a_record in records[ns_record]['A']:
+                            response_data['additional'].append({
+                                'domain': ns_record,
+                                'type': 'A',
+                                'data': a_record
+                            })
+                break
+            if '.' in closest_domain:
+                closest_domain = closest_domain.split('.', 1)[1]
+
             else:
                 break
-        else:
-            response_data['ANSWER_SECTION'].append(
-                {'domain': qname, 'type': qtype, 'data': 'No such record'})
-            break
-
+        print('closest_domain:',
+              (closest_domain in records and 'NS' in records[closest_domain]))
+        if root_domain in records and 'NS' in records[root_domain] and not (closest_domain in records and 'NS' in records[closest_domain]):
+            for ns_record in records[root_domain]['NS']:
+                response_data['authority'].append({
+                    'domain': root_domain,
+                    'type': 'NS',
+                    'data': ns_record
+                })
+                if ns_record in records and 'A' in records[ns_record]:
+                    for a_record in records[ns_record]['A']:
+                        response_data['additional'].append({
+                            'domain': ns_record,
+                            'type': 'A',
+                            'data': a_record
+                        })
     response = json.dumps(response_data).encode()
-    send_time = int(round(time.time()*1000))
+    send_time = int(round(time.time() * 1000))
     date_send_time = time_to_date(send_time)
     delay_time = (send_time - recv_time) / 1000
 
@@ -120,7 +150,7 @@ def main():
         return
 
     server_port = int(sys.argv[1])
-    records = load_master_file("sample_master.txt")
+    records = load_master_file("master.txt")
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind(("127.0.0.1", server_port))

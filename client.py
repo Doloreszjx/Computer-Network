@@ -48,25 +48,48 @@ def main():
     try:
         response, _ = client_socket.recvfrom(1024)
         response_data = json.loads(response.decode())
-        print("Response from server:", response_data)
+        # print("Response from server:", response_data)
 
         qid = response_data.get('qid')
         qname = response_data.get('qname')
         qtype = response_data.get('qtype')
-        ANSWER_SECTION = response_data.get('ANSWER_SECTION')
+        answer_section = response_data.get('answer')
+        authority_section = response_data.get('authority')
+        additional_section = response_data.get('additional')
         answers = []
-        for ele in ANSWER_SECTION:
+        authorities = []
+        additionals = []
+        for ele in answer_section:
             format_ele = dic_to_str(ele)
             answers.append(format_ele)
+
+        for au_ele in authority_section:
+            format_ele = dic_to_str(au_ele)
+            authorities.append(format_ele)
+
+        for ad_ele in additional_section:
+            format_ele = dic_to_str(ad_ele)
+            additionals.append(format_ele)
         # print('response_data:', qid, qname, qtype, answers)
         if qtype in ['A', 'NS', 'CNAME']:
             print('ID: ', qid)
             print('\n')
             print('QUESTION SECTION:\n', qname, qtype)
-            print('\n')
-            print('ANSWER SECTION:')
-            for item in answers:
-                print(item)
+            if len(answers):
+                print('\n')
+                print('ANSWER SECTION:')
+                for item in answers:
+                    print(item)
+            if len(authorities):
+                print('\n')
+                print('AUTHORITY SECTION:')
+                for item in authorities:
+                    print(item)
+            if len(additionals):
+                print('\n')
+                print('ADDITIONAL SECTION:')
+                for item in additionals:
+                    print(item)
         else:
             print(f"Unknown type {qtype}: qname: {qname}")
 
